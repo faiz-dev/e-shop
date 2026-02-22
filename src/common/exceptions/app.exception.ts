@@ -1,0 +1,59 @@
+import { HttpException, HttpStatus } from '@nestjs/common';
+
+export class AppException extends HttpException {
+  public readonly errorCode: string;
+
+  constructor(
+    errorCode: string,
+    message: string,
+    status: HttpStatus = HttpStatus.BAD_REQUEST,
+  ) {
+    super(message, status);
+    this.errorCode = errorCode;
+  }
+}
+
+// Common error codes
+export const ErrorCodes = {
+  // Auth
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  EMAIL_ALREADY_EXISTS: 'EMAIL_ALREADY_EXISTS',
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+
+  // Product
+  PRODUCT_NOT_FOUND: 'PRODUCT_NOT_FOUND',
+  VARIANT_NOT_FOUND: 'VARIANT_NOT_FOUND',
+  INSUFFICIENT_STOCK: 'INSUFFICIENT_STOCK',
+
+  // Category
+  CATEGORY_NOT_FOUND: 'CATEGORY_NOT_FOUND',
+  CATEGORY_ALREADY_EXISTS: 'CATEGORY_ALREADY_EXISTS',
+
+  // Cart
+  CART_ITEM_NOT_FOUND: 'CART_ITEM_NOT_FOUND',
+  CART_EMPTY: 'CART_EMPTY',
+
+  // Coupon
+  COUPON_NOT_FOUND: 'COUPON_NOT_FOUND',
+  COUPON_INVALID: 'COUPON_INVALID',
+  COUPON_EXPIRED: 'COUPON_EXPIRED',
+  COUPON_USAGE_LIMIT: 'COUPON_USAGE_LIMIT',
+  COUPON_MIN_ORDER: 'COUPON_MIN_ORDER',
+
+  // Transaction
+  TRANSACTION_NOT_FOUND: 'TRANSACTION_NOT_FOUND',
+  TRANSACTION_INVALID_STATUS: 'TRANSACTION_INVALID_STATUS',
+
+  // Midtrans
+  MIDTRANS_ERROR: 'MIDTRANS_ERROR',
+  MIDTRANS_INVALID_SIGNATURE: 'MIDTRANS_INVALID_SIGNATURE',
+
+  // Rating
+  ALREADY_RATED: 'ALREADY_RATED',
+
+  // General
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+  NOT_FOUND: 'NOT_FOUND',
+} as const;
