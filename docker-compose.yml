@@ -33,6 +33,9 @@ services:
       MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-your-midtrans-client-key}
       MIDTRANS_IS_PRODUCTION: "false"
       APP_PORT: 3000
+    networks:
+      - default
+      - public_net
     depends_on:
       db:
         condition: service_healthy
@@ -54,3 +57,7 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  public_net:
+    external: true
