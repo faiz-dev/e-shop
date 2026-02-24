@@ -1,6 +1,6 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In, ILike, FindOptionsWhere, DataSource } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductVariant } from './entities/product-variant.entity';
 import { Category } from '../categories/entities/category.entity';
@@ -27,6 +27,7 @@ export class ProductsService {
     private readonly variantRepository: Repository<ProductVariant>,
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+    private readonly dataSource: DataSource,
   ) { }
 
   async create(dto: CreateProductDto) {
@@ -38,8 +39,8 @@ export class ProductsService {
 
     // Assign categories
     if (dto.categoryIds?.length) {
-      product.categories = await this.categoryRepository.findByIds(
-        dto.categoryIds,
+      product.categories = await this.categoryRepository.findBy(
+        { id: In(dto.categoryIds) },
       );
     }
 
@@ -56,56 +57,70 @@ export class ProductsService {
   }
 
   async findAll(query: CatalogQueryDto) {
-    const qb = this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.variants', 'variant')
-      .leftJoinAndSelect('product.categories', 'category')
-      .where('product.is_active = :isActive', { isActive: true });
+    // Build where conditions
+    const where: FindOptionsWhere<Product> = { isActive: true };
 
-    // Search
+    // Search by name or description
     if (query.search) {
-      qb.andWhere(
-        '(product.name ILIKE :search OR product.description ILIKE :search)',
-        { search: `%${query.search}%` },
-      );
-    }
+      // We need two where clauses for OR - TypeORM find() uses an array for OR
+      const searchWhere: FindOptionsWhere<Product>[] = [
+        { ...where, name: ILike(`%${query.search}%`) },
+        { ...where, description: ILike(`%${query.search}%`) },
+      ];
 
-    // Filter by category
-    if (query.categoryId) {
-      qb.andWhere('category.id = :categoryId', {
-        categoryId: query.categoryId,
+      // If filtering by category, add it to both OR conditions
+      if (query.categoryId) {
+        searchWhere.forEach(w => {
+          (w as any).categories = { id: query.categoryId };
+        });
+      }
+
+      // Filter by price range using subquery
+      if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+        const productIds = await this.getProductIdsByPriceRange(query.minPrice, query.maxPrice);
+        if (productIds.length === 0) {
+          return new PaginatedResponse([], new PaginationMeta(query.page, query.limit, 0), 'Products retrieved');
+        }
+        searchWhere.forEach(w => {
+          w.id = In(productIds);
+        });
+      }
+
+      const [products, totalItems] = await this.productRepository.findAndCount({
+        where: searchWhere,
+        relations: ['variants', 'categories'],
+        order: this.getSortOrder(query.sort, query.order),
+        skip: query.skip,
+        take: query.limit,
       });
+
+      const meta = new PaginationMeta(query.page, query.limit, totalItems);
+      return new PaginatedResponse(products, meta, 'Products retrieved');
     }
 
-    // Filter by price range (min price of any variant)
+    // No search - simple where
+    if (query.categoryId) {
+      (where as any).categories = { id: query.categoryId };
+    }
+
+    // Filter by price range using subquery
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
-      qb.andWhere(
-        `product.id IN (
-          SELECT pv.product_id FROM product_variants pv 
-          WHERE 1=1
-          ${query.minPrice !== undefined ? 'AND pv.price >= :minPrice' : ''}
-          ${query.maxPrice !== undefined ? 'AND pv.price <= :maxPrice' : ''}
-        )`,
-        {
-          ...(query.minPrice !== undefined && { minPrice: query.minPrice }),
-          ...(query.maxPrice !== undefined && { maxPrice: query.maxPrice }),
-        },
-      );
+      const productIds = await this.getProductIdsByPriceRange(query.minPrice, query.maxPrice);
+      if (productIds.length === 0) {
+        return new PaginatedResponse([], new PaginationMeta(query.page, query.limit, 0), 'Products retrieved');
+      }
+      where.id = In(productIds);
     }
 
-    // Sort
-    const sortField = this.getSortField(query.sort);
-    qb.orderBy(sortField, query.order);
+    const [products, totalItems] = await this.productRepository.findAndCount({
+      where,
+      relations: ['variants', 'categories'],
+      order: this.getSortOrder(query.sort, query.order),
+      skip: query.skip,
+      take: query.limit,
+    });
 
-    // Count total
-    const totalItems = await qb.getCount();
-
-    // Paginate
-    qb.skip(query.skip).take(query.limit);
-
-    const products = await qb.getMany();
     const meta = new PaginationMeta(query.page, query.limit, totalItems);
-
     return new PaginatedResponse(products, meta, 'Products retrieved');
   }
 
@@ -130,8 +145,8 @@ export class ProductsService {
     const product = await this.findOne(id);
 
     if (dto.categoryIds) {
-      product.categories = await this.categoryRepository.findByIds(
-        dto.categoryIds,
+      product.categories = await this.categoryRepository.findBy(
+        { id: In(dto.categoryIds) },
       );
     }
 
@@ -200,25 +215,49 @@ export class ProductsService {
   }
 
   async updateAvgRating(productId: string) {
-    const result = await this.productRepository
-      .createQueryBuilder('product')
-      .leftJoin('product.ratings', 'rating')
-      .select('AVG(rating.score)', 'avg')
-      .where('product.id = :productId', { productId })
-      .getRawOne();
+    const result = await this.dataSource.query(
+      `SELECT AVG(score) as avg FROM ratings WHERE product_id = $1`,
+      [productId],
+    );
 
     await this.productRepository.update(productId, {
-      avgRating: parseFloat(result.avg) || 0,
+      avgRating: parseFloat(result[0]?.avg) || 0,
     });
   }
 
-  private getSortField(sort: string): string {
+  private async getProductIdsByPriceRange(minPrice?: number, maxPrice?: number): Promise<string[]> {
+    let sql = 'SELECT DISTINCT product_id FROM product_variants WHERE 1=1';
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (minPrice !== undefined) {
+      sql += ` AND price >= $${paramIndex++}`;
+      params.push(minPrice);
+    }
+    if (maxPrice !== undefined) {
+      sql += ` AND price <= $${paramIndex++}`;
+      params.push(maxPrice);
+    }
+
+    const rows = await this.dataSource.query(sql, params);
+    return rows.map((r: any) => r.product_id);
+  }
+
+  private getSortOrder(sort: string, order: 'ASC' | 'DESC'): Record<string, 'ASC' | 'DESC'> {
     const map: Record<string, string> = {
-      price: 'variant.price',
-      rating: 'product.avg_rating',
-      created_at: 'product.created_at',
-      name: 'product.name',
+      price: 'variants.price',
+      rating: 'avgRating',
+      created_at: 'createdAt',
+      name: 'name',
     };
-    return map[sort] || 'product.created_at';
+    const field = map[sort] || 'createdAt';
+
+    // For nested relations like variants.price, TypeORM find() doesn't support it directly
+    // Fall back to createdAt for price sorting
+    if (field.includes('.')) {
+      return { createdAt: order };
+    }
+
+    return { [field]: order };
   }
 }

@@ -40,16 +40,13 @@ export class Product {
 
   @OneToMany(() => ProductVariant, (variant) => variant.product, {
     cascade: true,
-    eager: true,
   })
   variants: ProductVariant[];
 
   @OneToMany(() => Rating, (rating) => rating.product)
   ratings: Rating[];
 
-  @ManyToMany(() => Category, (category) => category.products, {
-    eager: true,
-  })
+  @ManyToMany(() => Category, (category) => category.products)
   @JoinTable({
     name: 'product_categories',
     joinColumn: { name: 'product_id' },
