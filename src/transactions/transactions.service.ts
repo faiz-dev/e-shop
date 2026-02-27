@@ -185,6 +185,17 @@ export class TransactionsService {
 
       await queryRunner.commitTransaction();
 
+      // Auto-confirm payment in mock mode
+      if (this.midtransService.isMockMode) {
+        await this.handlePaymentNotification(
+          midtransOrderId,
+          TransactionStatus.PROCESSED,
+          'mock_payment',
+        );
+        savedTransaction.status = TransactionStatus.PROCESSED;
+        this.logger.log(`[MOCK] Auto-confirmed payment for order: ${midtransOrderId}`);
+      }
+
       return {
         id: savedTransaction.id,
         midtransOrderId,
