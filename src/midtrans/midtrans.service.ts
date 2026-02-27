@@ -27,22 +27,43 @@ export interface SnapResponse {
 
 @Injectable()
 export class MidtransService {
-  private readonly snap: InstanceType<typeof midtransClient.Snap>;
+  private readonly snap: InstanceType<typeof midtransClient.Snap> | null;
   private readonly serverKey: string;
+  private readonly isMock: boolean;
   private readonly logger = new Logger(MidtransService.name);
 
   constructor(private readonly configService: ConfigService) {
+    this.isMock =
+      this.configService.get<string>('MIDTRANS_MOCK', 'false') === 'true';
     this.serverKey = this.configService.get<string>('MIDTRANS_SERVER_KEY', '');
 
-    this.snap = new midtransClient.Snap({
-      isProduction:
-        this.configService.get<string>('MIDTRANS_IS_PRODUCTION') === 'true',
-      serverKey: this.serverKey,
-      clientKey: this.configService.get<string>('MIDTRANS_CLIENT_KEY', ''),
-    });
+    if (this.isMock) {
+      this.snap = null;
+      this.logger.warn('Midtrans is running in MOCK mode — no real payments will be created');
+    } else {
+      this.snap = new midtransClient.Snap({
+        isProduction:
+          this.configService.get<string>('MIDTRANS_IS_PRODUCTION') === 'true',
+        serverKey: this.serverKey,
+        clientKey: this.configService.get<string>('MIDTRANS_CLIENT_KEY', ''),
+      });
+    }
+  }
+
+  get isMockMode(): boolean {
+    return this.isMock;
   }
 
   async createTransaction(params: SnapTransactionParams): Promise<SnapResponse> {
+    // Mock mode: return dummy token & URL without calling Midtrans
+    if (this.isMock) {
+      this.logger.log(`[MOCK] Snap token created for order: ${params.orderId}`);
+      return {
+        token: `mock-snap-token-${params.orderId}`,
+        redirect_url: `http://localhost:3000/mock-payment/${params.orderId}`,
+      };
+    }
+
     const parameter = {
       transaction_details: {
         order_id: params.orderId,
@@ -65,7 +86,7 @@ export class MidtransService {
     };
 
     try {
-      const response = await this.snap.createTransaction(parameter);
+      const response = await this.snap!.createTransaction(parameter);
       this.logger.log(`Snap token created for order: ${params.orderId}`);
       return response as SnapResponse;
     } catch (error) {
@@ -80,6 +101,12 @@ export class MidtransService {
     grossAmount: string,
     signatureKey: string,
   ): boolean {
+    // Mock mode: always accept signatures
+    if (this.isMock) {
+      this.logger.log(`[MOCK] Signature verification bypassed for order: ${orderId}`);
+      return true;
+    }
+
     const payload = orderId + statusCode + grossAmount + this.serverKey;
     const hash = crypto.createHash('sha512').update(payload).digest('hex');
     return hash === signatureKey;

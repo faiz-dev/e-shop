@@ -1,5 +1,14 @@
-import { Controller, Post, Body, Logger, HttpCode } from '@nestjs/common';
-import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  Param,
+  Logger,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
+import { ApiTags, ApiExcludeEndpoint, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { MidtransService } from './midtrans.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { AppException, ErrorCodes } from '../common';
@@ -77,5 +86,68 @@ export class MidtransController {
     }
 
     return { status: 'ok' };
+  }
+
+  /**
+   * Mock endpoint to simulate Midtrans payment confirmation.
+   * Only available when MIDTRANS_MOCK=true.
+   */
+  @Post('mock-confirm/:orderId')
+  @HttpCode(200)
+  @ApiOperation({ summary: '[DEV] Simulate payment confirmation (mock mode only)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['settlement', 'cancel', 'expire'],
+          default: 'settlement',
+          description: 'Simulated Midtrans transaction status',
+        },
+      },
+    },
+    required: false,
+  })
+  async mockConfirm(
+    @Param('orderId') orderId: string,
+    @Body() body: { status?: string },
+  ) {
+    if (!this.midtransService.isMockMode) {
+      throw new NotFoundException(
+        'This endpoint is only available when MIDTRANS_MOCK=true',
+      );
+    }
+
+    const simulatedStatus = body?.status || 'settlement';
+    this.logger.log(
+      `[MOCK] Simulating payment "${simulatedStatus}" for order: ${orderId}`,
+    );
+
+    let newStatus: TransactionStatus;
+    switch (simulatedStatus) {
+      case 'settlement':
+        newStatus = TransactionStatus.PROCESSED;
+        break;
+      case 'cancel':
+        newStatus = TransactionStatus.CANCELLED;
+        break;
+      case 'expire':
+        newStatus = TransactionStatus.EXPIRED;
+        break;
+      default:
+        newStatus = TransactionStatus.PROCESSED;
+    }
+
+    await this.transactionsService.handlePaymentNotification(
+      orderId,
+      newStatus,
+      'mock_payment',
+    );
+
+    return {
+      status: 'ok',
+      message: `[MOCK] Order ${orderId} updated to "${newStatus}"`,
+    };
   }
 }
