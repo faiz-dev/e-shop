@@ -33,8 +33,8 @@ export class MidtransService {
   private readonly logger = new Logger(MidtransService.name);
 
   constructor(private readonly configService: ConfigService) {
-    this.isMock =
-      this.configService.get<string>('MIDTRANS_MOCK', 'false') === 'true';
+    this.isMock = true;
+    //this.isMock = this.configService.get<string>('MIDTRANS_MOCK', 'false') === 'true';
     this.serverKey = this.configService.get<string>('MIDTRANS_SERVER_KEY', '');
 
     if (this.isMock) {

@@ -138,6 +138,7 @@ export class TransactionsService {
         snapToken = snapResponse.token;
         snapRedirectUrl = snapResponse.redirect_url;
       } catch (error) {
+        console.log("this here", error)
         this.logger.error(`Midtrans error: ${JSON.stringify(error)}`);
         throw new AppException(
           ErrorCodes.MIDTRANS_ERROR,
