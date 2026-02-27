@@ -22,6 +22,9 @@ export class TransactionItem {
   @Column({ name: 'product_name' })
   productName: string;
 
+  @Column({ name: 'product_image', nullable: true })
+  productImage: string;
+
   @Column({ name: 'variant_name' })
   variantName: string;
 

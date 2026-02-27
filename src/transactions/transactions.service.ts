@@ -168,6 +168,7 @@ export class TransactionsService {
           transactionId: savedTransaction.id,
           variantId: cartItem.variantId,
           productName: cartItem.variant.product.name,
+          productImage: cartItem.variant.product.imageUrl || undefined,
           variantName: cartItem.variant.name,
           price: Number(cartItem.variant.price),
           quantity: cartItem.quantity,
